@@ -13,7 +13,15 @@ Clases de salida:
 - `redspider`
 - `rust`
 
-## 1) Estructura real del proyecto
+## 1) Regla del proyecto: una sola version de Python
+
+Este proyecto usa una unica version de Python:
+
+- Python `3.10`
+
+No se deben crear entornos con 3.11, 3.12 o 3.13 para este repositorio.
+
+## 2) Estructura real del proyecto
 
 ```
 model-trainer/
@@ -40,70 +48,46 @@ model-trainer/
 └── saved_models/
 ```
 
-## 2) Instalacion con uv (recomendada)
+## 3) Instalacion con uv (unico entorno)
 
-Este repositorio ya esta preparado para trabajar con `uv`.
-
-### 2.1 Instalar uv
-
-Si no lo tienes:
+### 3.1 Instalar uv
 
 ```powershell
 winget install --id=astral-sh.uv -e
-```
-
-Verifica:
-
-```powershell
 uv --version
 ```
 
-### 2.2 Entorno CPU (Python 3.13)
-
-```powershell
-uv python install 3.13
-uv venv .venv-py313 --python 3.13
-uv pip install --python .venv-py313\Scripts\python.exe -r requirements.txt
-```
-
-### 2.3 Entorno GPU Windows (DirectML, validado)
-
-En Windows nativo, esta ruta es la validada para aceleracion:
-
-- Python `3.10`
-- `tensorflow-cpu==2.10.0`
-- `tensorflow-directml-plugin`
+### 3.2 Crear entorno unico Python 3.10
 
 ```powershell
 uv python install 3.10
-uv venv .venv-py310-dml --python 3.10
-uv pip install --python .venv-py310-dml\Scripts\python.exe -r requirements-dml.txt
+uv venv .venv --python 3.10
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 ```
 
-Diagnostico rapido:
+`requirements.txt` es ahora el archivo oficial para todas las ejecuciones.
+
+## 4) Verificar acelerador (GPU/DirectML)
 
 ```powershell
-.venv-py310-dml\Scripts\python.exe -c "import tensorflow as tf; print('TF', tf.__version__); print('GPU', tf.config.list_physical_devices('GPU')); print('DML', tf.config.list_physical_devices('DML'))"
+.venv\Scripts\python.exe -c "import tensorflow as tf; print('TF', tf.__version__); print('GPU', tf.config.list_physical_devices('GPU')); print('DML', tf.config.list_physical_devices('DML'))"
 ```
 
-Nota: en este stack, DirectML puede aparecer como dispositivo `GPU`.
+Nota: con este stack, DirectML puede mostrarse como `GPU`.
 
-## 3) Ejecutar scripts usando entornos creados por uv
+## 5) Ejecutar scripts del proyecto
 
-Para evitar activar/desactivar entornos manualmente:
+Para evitar activar manualmente el entorno en cada terminal:
 
 ```powershell
-$PY_CPU = ".venv-py313\Scripts\python.exe"
-$PY_GPU = ".venv-py310-dml\Scripts\python.exe"
+$PY = ".venv\Scripts\python.exe"
 ```
 
-Luego ejecutas cualquier script con la variable adecuada.
-
-## 4) Entrenamiento del detector (hoja)
+## 6) Entrenamiento del detector (hoja)
 
 Script: `train_detector.py`
 
-### 4.1 Formato de dataset del detector
+### 6.1 Formato de dataset del detector
 
 - YAML: `dataset/leaf_detection.yaml`
 - Imagenes: `dataset/images/train`, `dataset/images/val`
@@ -117,16 +101,18 @@ class_id cx cy w h
 
 Valores normalizados entre 0 y 1.
 
-### 4.2 Entrenar detector en CPU
+### 6.2 Entrenar detector
+
+CPU:
 
 ```powershell
-$PY_CPU train_detector.py --data dataset/leaf_detection.yaml --epochs 50 --batch 16 --imgsz 640 --model small --device cpu
+$PY train_detector.py --data dataset/leaf_detection.yaml --epochs 50 --batch 16 --imgsz 640 --model small --device cpu
 ```
 
-### 4.3 Entrenar detector en GPU/DirectML
+GPU/DirectML (recomendado):
 
 ```powershell
-$PY_GPU train_detector.py --data dataset/leaf_detection.yaml --epochs 50 --batch 16 --imgsz 640 --model small --device auto --strict-device
+$PY train_detector.py --data dataset/leaf_detection.yaml --epochs 50 --batch 16 --imgsz 640 --model small --device auto --strict-device
 ```
 
 Opciones principales del detector:
@@ -135,7 +121,7 @@ Opciones principales del detector:
 - `--device`: `auto | gpu | dml | cpu`
 - `--strict-device`: aborta si no hay acelerador cuando se solicita GPU/DML
 
-## 5) Entrenamiento del clasificador de enfermedad
+## 7) Entrenamiento del clasificador de enfermedad
 
 Script: `train_classifier.py`
 
@@ -147,7 +133,7 @@ Dataset esperado (por carpetas de clase):
 Entrenamiento base:
 
 ```powershell
-$PY_CPU train_classifier.py --arch efficientnetb0 --epochs 30 --ft-epochs 15 --aug moderate
+$PY train_classifier.py --arch efficientnetb0 --epochs 30 --ft-epochs 15 --aug moderate
 ```
 
 Opciones principales del clasificador:
@@ -158,19 +144,17 @@ Opciones principales del clasificador:
 - `--aug`: `light | moderate | strong`
 - `--no-weights`: desactiva class weights
 
-## 6) Uso de modelos en inferencia
+## 8) Uso de modelos en inferencia
 
 Script principal: `pipeline.py`
 
-### 6.1 Desde CLI
+### 8.1 Desde CLI
 
 ```powershell
-$PY_CPU pipeline.py dataset/test/rust/1120.jpg
+$PY pipeline.py dataset/test/rust/1120.jpg
 ```
 
-Esto crea salida visual en `pipeline_results/`.
-
-### 6.2 Desde Python
+### 8.2 Desde Python
 
 ```python
 from pipeline import CoffeeDiseaseDetectionPipeline
@@ -182,7 +166,7 @@ pipe.visualize(result, save_path="resultado.jpg", show=False)
 print(result["summary"])
 ```
 
-## 7) Rutas de modelos generados
+## 9) Rutas de modelos generados
 
 Definidas en `config.py`:
 
@@ -190,27 +174,23 @@ Definidas en `config.py`:
 - Clasificador final: `saved_models/disease_classifier.keras`
 - Mejor clasificador (checkpoint): `saved_models/best_disease_classifier.keras`
 
-## 8) Ejecucion directa con uv run (opcional)
+## 10) uv run (opcional)
 
-Para el flujo CPU base del proyecto tambien puedes usar:
+Tambien puedes ejecutar con `uv run` manteniendo Python 3.10:
 
 ```powershell
-uv run --python 3.13 train_classifier.py --arch efficientnetb0 --epochs 5 --ft-epochs 2
-uv run --python 3.13 pipeline.py dataset/test/rust/1120.jpg
+uv run --python 3.10 train_classifier.py --arch efficientnetb0 --epochs 5 --ft-epochs 2
+uv run --python 3.10 pipeline.py dataset/test/rust/1120.jpg
 ```
 
-Para GPU/DirectML en Windows, usa preferentemente el interprete del entorno `.venv-py310-dml` (seccion 3) porque depende de `requirements-dml.txt`.
-
-## 9) Troubleshooting rapido
+## 11) Troubleshooting rapido
 
 ### `--strict-device` falla
 
 Significa que TensorFlow no detecto acelerador en ese entorno.
 
-Valida con:
-
 ```powershell
-$PY_GPU -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU')); print(tf.config.list_physical_devices('DML'))"
+$PY -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU')); print(tf.config.list_physical_devices('DML'))"
 ```
 
 ### Entrena pero muy lento
@@ -221,7 +201,7 @@ $PY_GPU -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'
 
 ---
 
-Si actualizas versiones de dependencias del entorno CPU basado en `pyproject.toml`:
+Si modificas dependencias del proyecto:
 
 ```powershell
 uv lock

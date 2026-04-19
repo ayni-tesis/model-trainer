@@ -1,7 +1,4 @@
 .venv
-.venv-py313
-.venv-py311-dml
-.venv-py310-dml
 uv.lock
 dataset
 runs
