@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 train_detector.py
-Entrena el detector de hojas de café con YOLOv8.
+Entrena el detector de hojas de cafe con TensorFlow.
 
 Uso:
     python train_detector.py
-    python train_detector.py --epochs 100 --model yolov8s.pt --device cpu
+    python train_detector.py --epochs 100 --model small --device cpu
 
 Antes de correr:
     1. Anota tus imágenes con bounding boxes de hojas.
@@ -232,52 +232,122 @@ def validate_yolo_dataset(yaml_path: str) -> bool:
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Entrenamiento del detector de hojas (YOLO)")
+    p = argparse.ArgumentParser(description="Entrenamiento del detector de hojas (TensorFlow)")
     p.add_argument("--model",   default=YOLO_MODEL_SIZE,
-                   help="Backbone YOLO (yolov8n.pt / yolov8s.pt / yolov8m.pt)")
+                   help="Preset del detector (tiny / small / medium)")
     p.add_argument("--data",    default=YOLO_DATA_YAML,
                    help="Ruta al archivo .yaml del dataset")
     p.add_argument("--epochs",  type=int, default=YOLO_EPOCHS)
     p.add_argument("--batch",   type=int, default=YOLO_BATCH)
     p.add_argument("--imgsz",   type=int, default=YOLO_IMG_SIZE)
-    p.add_argument("--device",  default="0",
-                   help="'0' para GPU, 'cpu' para CPU")
+    p.add_argument("--device",  default="auto",
+                   help="'auto'|'gpu'|'dml'|'cpu'")
+    p.add_argument(
+        "--strict-device",
+        action="store_true",
+        help="Si se solicita GPU y TensorFlow no detecta GPU, aborta",
+    )
     p.add_argument("--project", default="runs/leaf_detector")
     p.add_argument("--name",    default="train")
     return p.parse_args()
 
 
-def resolve_device(requested_device: str) -> str:
-    """Resuelve device para YOLO con fallback a CPU si CUDA no está disponible."""
-    if str(requested_device).lower() == "cpu":
+def resolve_device(requested_device: str, strict_device: bool = False) -> str:
+    """Resuelve device para TensorFlow con soporte CUDA y DirectML."""
+    normalized = str(requested_device).lower()
+    if normalized == "cpu":
         return "cpu"
 
-    if str(requested_device).isdigit():
-        try:
-            import torch
+    if normalized not in {"auto", "gpu", "dml"}:
+        print(f"⚠️  device '{requested_device}' no reconocido. Se usara 'auto'.")
+        normalized = "auto"
 
-            if not torch.cuda.is_available():
-                print("⚠️  CUDA no disponible. Se usará CPU automáticamente.")
-                return "cpu"
+    try:
+        import tensorflow as tf
 
-            requested_idx = int(requested_device)
-            if requested_idx >= torch.cuda.device_count():
-                print(
-                    f"⚠️  GPU index {requested_idx} no existe "
-                    f"(dispositivos disponibles: {torch.cuda.device_count()}). "
-                    "Se usará CPU automáticamente."
-                )
-                return "cpu"
-        except Exception:
-            print("⚠️  No se pudo validar CUDA. Se usará CPU automáticamente.")
+        gpus = tf.config.list_physical_devices("GPU")
+        dml_devices = tf.config.list_physical_devices("DML")
+
+        if normalized == "gpu":
+            if gpus:
+                return "gpu"
+            if dml_devices:
+                print("⚠️  GPU CUDA no disponible. Se usara DirectML (DML:0).")
+                return "dml"
+            msg = (
+                "⚠️  TensorFlow no detecta aceleradores (GPU/DML) en este entorno. "
+                "Se usara CPU automaticamente.\n"
+                "   Nota: En Windows nativo, TF 2.11+ no usa CUDA GPU; usa DirectML o WSL2."
+            )
+            if strict_device:
+                raise RuntimeError(msg)
+            print(msg)
             return "cpu"
 
-    return requested_device
+        if normalized == "dml":
+            if dml_devices:
+                return "dml"
+            msg = "⚠️  DirectML no disponible. Se usara CPU automaticamente."
+            if strict_device:
+                raise RuntimeError(msg)
+            print(msg)
+            return "cpu"
+
+        # auto
+        if gpus:
+            return "gpu"
+        if dml_devices:
+            return "dml"
+
+        msg = (
+            "⚠️  TensorFlow no detecta aceleradores (GPU/DML) en este entorno. "
+            "Se usara CPU automaticamente."
+        )
+        if strict_device:
+            raise RuntimeError(msg)
+        print(msg)
+        return "cpu"
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        msg = f"⚠️  No se pudo validar GPU en TensorFlow ({exc}). Se usara CPU automaticamente."
+        if strict_device:
+            raise RuntimeError(msg) from exc
+        print(msg)
+        return "cpu"
+
+
+def print_tf_diagnostics(requested_device: str, selected_device: str):
+    """Imprime estado de TensorFlow y GPUs visibles en el entorno."""
+    print("\nDiagnostico de dispositivo (TensorFlow):")
+    print(f"   solicitado: {requested_device}")
+    print(f"   seleccionado: {selected_device}")
+
+    try:
+        import tensorflow as tf
+
+        gpus = tf.config.list_physical_devices("GPU")
+        dml_devices = tf.config.list_physical_devices("DML")
+        print(f"   tensorflow: {tf.__version__}")
+        print(f"   tf GPUs visibles: {len(gpus)}")
+        for idx, gpu in enumerate(gpus):
+            print(f"   GPU[{idx}]: {gpu.name}")
+        print(f"   tf DML visibles: {len(dml_devices)}")
+        for idx, dml in enumerate(dml_devices):
+            print(f"   DML[{idx}]: {dml.name}")
+    except Exception as exc:
+        print(f"   ⚠️  No se pudo leer diagnostico TensorFlow: {exc}")
 
 
 def main():
     args = parse_args()
-    selected_device = resolve_device(args.device)
+    try:
+        selected_device = resolve_device(args.device, strict_device=args.strict_device)
+    except RuntimeError as exc:
+        print(f"❌ {exc}")
+        return
+
+    print_tf_diagnostics(args.device, selected_device)
 
     # Crear YAML de ejemplo si no existe
     create_yaml_if_missing(args.data)
@@ -290,8 +360,7 @@ def main():
     if not validate_yolo_dataset(args.data):
         return
 
-    detector = LeafDetector(model_path=None)   # carga backbone base
-    detector.model = __import__('ultralytics').YOLO(args.model)
+    detector = LeafDetector(model_path=None, model_variant=args.model)
 
     results = detector.train(
         data_yaml = args.data,
@@ -303,7 +372,7 @@ def main():
         device    = selected_device,
     )
 
-    print(f"\n✅ Entrenamiento finalizado.")
+    print(f"\nEntrenamiento finalizado.")
     print(f"   Modelo guardado en: {DETECTOR_MODEL_PATH}")
 
 

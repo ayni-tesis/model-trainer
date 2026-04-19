@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 pipeline.py
-Pipeline completo: Detector de hojas (YOLO) → Clasificador de enfermedades (EfficientNet)
+Pipeline completo: Detector de hojas (TensorFlow) -> Clasificador de enfermedades (EfficientNet)
 
 Flujo:
   imagen
@@ -40,7 +40,7 @@ DISEASE_COLORS = {
 
 class CoffeeDiseaseDetectionPipeline:
     """
-    Pipeline que integra detección de hojas (YOLO) +
+    Pipeline que integra deteccion de hojas (TensorFlow) +
     clasificación de enfermedades (EfficientNet).
 
     Uso:
@@ -90,7 +90,7 @@ class CoffeeDiseaseDetectionPipeline:
         print(f"\n🔍 Detectando hojas en la imagen...")
         crops, detections = self.detector.detect_and_crop(image_np)
 
-        # ── Fallback si YOLO no detecta nada ──
+        # ── Fallback si el detector no detecta nada ──
         if len(crops) == 0:
             if USE_FULL_IMAGE_AS_FALLBACK:
                 print("⚠️  No se detectaron hojas. Usando imagen completa como fallback.")

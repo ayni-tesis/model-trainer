@@ -16,7 +16,7 @@ TEST_DIR          = os.path.join(DATA_DIR, "test")
 # Rutas de modelos guardados
 MODELS_DIR              = os.path.join(BASE_DIR, "saved_models")
 CLASSIFIER_MODEL_PATH   = os.path.join(MODELS_DIR, "disease_classifier.keras")
-DETECTOR_MODEL_PATH     = os.path.join(MODELS_DIR, "leaf_detector.pt")   # YOLOv8
+DETECTOR_MODEL_PATH     = os.path.join(MODELS_DIR, "leaf_detector.keras")
 BEST_CLASSIFIER_PATH    = os.path.join(MODELS_DIR, "best_disease_classifier.keras")
 
 os.makedirs(MODELS_DIR, exist_ok=True)
@@ -41,9 +41,9 @@ AUGMENT_STRENGTH     = 'moderate'   # 'light' | 'moderate' | 'strong'
 ARCHITECTURE         = 'efficientnetb0'  # 'mobilenetv2' | 'efficientnetb0' | 'resnet50'
 
 # ─────────────────────────────────────────────
-#  DETECTOR DE HOJAS (YOLOv8)
+#  DETECTOR DE HOJAS (TensorFlow)
 # ─────────────────────────────────────────────
-YOLO_MODEL_SIZE    = 'yolov8n.pt'   # nano; usa yolov8s/m/l/x para más precisión
+YOLO_MODEL_SIZE    = 'small'        # tiny | small | medium
 YOLO_IMG_SIZE      = 640
 YOLO_EPOCHS        = 50
 YOLO_BATCH         = 16
