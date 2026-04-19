@@ -1,138 +1,229 @@
-# Coffee Disease Detection — Pipeline de Dos Modelos
+# Coffee Disease Detection (Detector + Clasificador)
 
-## Arquitectura
+Pipeline de dos etapas para hojas de cafe:
 
-```
-Imagen de entrada
-      │
-      ▼
-┌─────────────────────┐
-│  Modelo 1: YOLO v8  │  ← Detecta y recorta hojas de café
-│  (leaf_detector.pt) │
-└─────────────────────┘
-      │  crops (1..N hojas)
-      ▼
-┌────────────────────────────┐
-│  Modelo 2: EfficientNetB0  │  ← Clasifica la enfermedad en cada hoja
-│ (disease_classifier.keras) │
-└────────────────────────────┘
-      │
-      ▼
-  Resultado por hoja:
-  { class, confidence, probabilities }
-```
+1. Detector de hojas con TensorFlow/Keras (`leaf_detector.keras`).
+2. Clasificador de enfermedad con transfer learning (`best_disease_classifier.keras`).
 
-**Clases de enfermedad:** `miner` | `nodisease` | `phoma` | `redspider` | `rust`
+Clases de salida:
 
----
+- `miner`
+- `nodisease`
+- `phoma`
+- `redspider`
+- `rust`
 
-## Estructura del Proyecto
+## 1) Estructura real del proyecto
 
 ```
-coffee_disease_detection/
-├── config.py                   # Todas las constantes y rutas
-├── dataset.py                  # Carga y augmentación de datos
-├── evaluate.py                 # Métricas y matriz de confusión
-├── pipeline.py                 # Pipeline completo (inferencia)
-├── train_classifier.py         # Entrena el clasificador EfficientNet
-├── train_detector.py           # Entrena el detector YOLO
+model-trainer/
+├── config.py
+├── dataset.py
+├── disease_classifier.py
+├── evaluate.py
+├── leaf_detector.py
+├── pipeline.py
+├── prepare_detector_dataset.py
+├── train_classifier.py
+├── train_detector.py
 ├── requirements.txt
-├── models/
-│   ├── __init__.py
-│   ├── disease_classifier.py   # Modelo EfficientNet
-│   └── leaf_detector.py        # Modelo YOLO
-└── dataset/
-    ├── train/                  # Subcarpetas por clase (clasificador)
-    │   ├── miner/
-    │   ├── nodisease/
-    │   ├── phoma/
-    │   ├── redspider/
-    │   └── rust/
-    ├── test/                   # Misma estructura que train/
-    ├── images/                 # Imágenes para YOLO (detección)
-    │   ├── train/
-    │   └── val/
-    ├── labels/                 # Anotaciones YOLO (bbox)
-    │   ├── train/
-    │   └── val/
-    └── leaf_detection.yaml     # Config del dataset YOLO
+├── requirements-dml.txt
+├── pyproject.toml
+├── dataset/
+│   ├── train/              # clasificador (subcarpetas por clase)
+│   ├── test/               # clasificador (subcarpetas por clase)
+│   ├── images/train/       # detector
+│   ├── images/val/         # detector
+│   ├── labels/train/       # detector (YOLO txt)
+│   ├── labels/val/         # detector (YOLO txt)
+│   └── leaf_detection.yaml
+└── saved_models/
 ```
 
----
+## 2) Instalacion con uv (recomendada)
 
-## Instalación
+Este repositorio ya esta preparado para trabajar con `uv`.
 
-```bash
-pip install -r requirements.txt
+### 2.1 Instalar uv
+
+Si no lo tienes:
+
+```powershell
+winget install --id=astral-sh.uv -e
 ```
 
----
+Verifica:
 
-## Flujo de Trabajo
-
-### Paso 1 — Entrenar el detector de hojas (YOLO)
-
-Primero anota tus imágenes con bounding boxes usando [Roboflow](https://roboflow.com)
-o [LabelImg](https://github.com/HumanSignal/labelImg), exportando en formato YOLO.
-
-```bash
-python train_detector.py --epochs 50 --model yolov8n.pt --device 0
+```powershell
+uv --version
 ```
 
-### Paso 2 — Entrenar el clasificador de enfermedades (EfficientNet)
+### 2.2 Entorno CPU (Python 3.13)
 
-```bash
-python train_classifier.py --arch efficientnetb0 --epochs 30 --ft-epochs 15
+```powershell
+uv python install 3.13
+uv venv .venv-py313 --python 3.13
+uv pip install --python .venv-py313\Scripts\python.exe -r requirements.txt
 ```
 
-Opciones:
-```
---arch        efficientnetb0 | mobilenetv2 | resnet50
---epochs      épocas fase 1 (backbone congelado)
---ft-epochs   épocas adicionales fase 2 (fine-tuning)
---aug         light | moderate | strong
---no-weights  desactiva balance de clases por peso
+### 2.3 Entorno GPU Windows (DirectML, validado)
+
+En Windows nativo, esta ruta es la validada para aceleracion:
+
+- Python `3.10`
+- `tensorflow-cpu==2.10.0`
+- `tensorflow-directml-plugin`
+
+```powershell
+uv python install 3.10
+uv venv .venv-py310-dml --python 3.10
+uv pip install --python .venv-py310-dml\Scripts\python.exe -r requirements-dml.txt
 ```
 
-### Paso 3 — Inferencia con el pipeline completo
+Diagnostico rapido:
+
+```powershell
+.venv-py310-dml\Scripts\python.exe -c "import tensorflow as tf; print('TF', tf.__version__); print('GPU', tf.config.list_physical_devices('GPU')); print('DML', tf.config.list_physical_devices('DML'))"
+```
+
+Nota: en este stack, DirectML puede aparecer como dispositivo `GPU`.
+
+## 3) Ejecutar scripts usando entornos creados por uv
+
+Para evitar activar/desactivar entornos manualmente:
+
+```powershell
+$PY_CPU = ".venv-py313\Scripts\python.exe"
+$PY_GPU = ".venv-py310-dml\Scripts\python.exe"
+```
+
+Luego ejecutas cualquier script con la variable adecuada.
+
+## 4) Entrenamiento del detector (hoja)
+
+Script: `train_detector.py`
+
+### 4.1 Formato de dataset del detector
+
+- YAML: `dataset/leaf_detection.yaml`
+- Imagenes: `dataset/images/train`, `dataset/images/val`
+- Labels YOLO: `dataset/labels/train`, `dataset/labels/val`
+
+Cada `.txt` debe tener lineas tipo:
+
+```
+class_id cx cy w h
+```
+
+Valores normalizados entre 0 y 1.
+
+### 4.2 Entrenar detector en CPU
+
+```powershell
+$PY_CPU train_detector.py --data dataset/leaf_detection.yaml --epochs 50 --batch 16 --imgsz 640 --model small --device cpu
+```
+
+### 4.3 Entrenar detector en GPU/DirectML
+
+```powershell
+$PY_GPU train_detector.py --data dataset/leaf_detection.yaml --epochs 50 --batch 16 --imgsz 640 --model small --device auto --strict-device
+```
+
+Opciones principales del detector:
+
+- `--model`: `tiny | small | medium`
+- `--device`: `auto | gpu | dml | cpu`
+- `--strict-device`: aborta si no hay acelerador cuando se solicita GPU/DML
+
+## 5) Entrenamiento del clasificador de enfermedad
+
+Script: `train_classifier.py`
+
+Dataset esperado (por carpetas de clase):
+
+- `dataset/train/miner`, `dataset/train/nodisease`, ...
+- `dataset/test/miner`, `dataset/test/nodisease`, ...
+
+Entrenamiento base:
+
+```powershell
+$PY_CPU train_classifier.py --arch efficientnetb0 --epochs 30 --ft-epochs 15 --aug moderate
+```
+
+Opciones principales del clasificador:
+
+- `--arch`: `efficientnetb0 | mobilenetv2 | resnet50`
+- `--epochs`: etapa 1 (backbone congelado)
+- `--ft-epochs`: etapa 2 (fine tuning)
+- `--aug`: `light | moderate | strong`
+- `--no-weights`: desactiva class weights
+
+## 6) Uso de modelos en inferencia
+
+Script principal: `pipeline.py`
+
+### 6.1 Desde CLI
+
+```powershell
+$PY_CPU pipeline.py dataset/test/rust/1120.jpg
+```
+
+Esto crea salida visual en `pipeline_results/`.
+
+### 6.2 Desde Python
 
 ```python
 from pipeline import CoffeeDiseaseDetectionPipeline
 
-pipeline = CoffeeDiseaseDetectionPipeline()
-results  = pipeline.run("mi_foto.jpg")
-pipeline.visualize(results, save_path="resultado.jpg", show=True)
+pipe = CoffeeDiseaseDetectionPipeline()
+result = pipe.run("dataset/test/rust/1120.jpg")
+pipe.visualize(result, save_path="resultado.jpg", show=False)
 
-print(results["summary"])
-# {'total_leaves': 3, 'disease_counts': {'rust': 2, 'nodisease': 1},
-#  'most_common': 'rust', 'healthy_pct': 33.3}
+print(result["summary"])
 ```
 
-O desde la línea de comandos:
+## 7) Rutas de modelos generados
 
-```bash
-python pipeline.py dataset/test/rust/1120.jpg
+Definidas en `config.py`:
+
+- Detector final: `saved_models/leaf_detector.keras`
+- Clasificador final: `saved_models/disease_classifier.keras`
+- Mejor clasificador (checkpoint): `saved_models/best_disease_classifier.keras`
+
+## 8) Ejecucion directa con uv run (opcional)
+
+Para el flujo CPU base del proyecto tambien puedes usar:
+
+```powershell
+uv run --python 3.13 train_classifier.py --arch efficientnetb0 --epochs 5 --ft-epochs 2
+uv run --python 3.13 pipeline.py dataset/test/rust/1120.jpg
 ```
+
+Para GPU/DirectML en Windows, usa preferentemente el interprete del entorno `.venv-py310-dml` (seccion 3) porque depende de `requirements-dml.txt`.
+
+## 9) Troubleshooting rapido
+
+### `--strict-device` falla
+
+Significa que TensorFlow no detecto acelerador en ese entorno.
+
+Valida con:
+
+```powershell
+$PY_GPU -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU')); print(tf.config.list_physical_devices('DML'))"
+```
+
+### Entrena pero muy lento
+
+- Revisa que no este cayendo a CPU.
+- Prueba `--imgsz 320` o `--imgsz 160` para smoke tests.
+- Reduce `--batch` si hay poca memoria.
 
 ---
 
-## leaf_detection.yaml (ejemplo)
+Si actualizas versiones de dependencias del entorno CPU basado en `pyproject.toml`:
 
-```yaml
-path: /ruta/absoluta/al/dataset
-train: images/train
-val:   images/val
-
-nc: 1
-names:
-  - coffee_leaf
+```powershell
+uv lock
+uv sync
 ```
-
----
-
-## Notas
-
-- Si YOLO no detecta ninguna hoja, el pipeline usa la imagen completa
-  como fallback (configurable en `config.py → USE_FULL_IMAGE_AS_FALLBACK`).
-- Los modelos entrenados se guardan automáticamente en `saved_models/`.
-- Para cambiar el backbone, edita `ARCHITECTURE` en `config.py`.
