@@ -62,25 +62,37 @@ uv --version
 ```powershell
 uv python install 3.10
 uv venv .venv --python 3.10
-uv pip install --python .venv\Scripts\python.exe -r requirements.txt
+uv sync
 ```
 
-`requirements.txt` es ahora el archivo oficial para todas las ejecuciones.
+`uv` gestiona el entorno automaticamente. No necesitas activar `.venv` ni guardar variables como `$PY`.
+
+Si prefieres instalación manual (equivalente), este comando también es válido:
+
+```powershell
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt
+```
 
 ## 4) Verificar acelerador (GPU/DirectML)
 
 ```powershell
-.venv\Scripts\python.exe -c "import tensorflow as tf; print('TF', tf.__version__); print('GPU', tf.config.list_physical_devices('GPU')); print('DML', tf.config.list_physical_devices('DML'))"
+uv run --python 3.10 python -c "import tensorflow as tf; print('TF', tf.__version__); print('GPU', tf.config.list_physical_devices('GPU')); print('DML', tf.config.list_physical_devices('DML'))"
 ```
 
 Nota: con este stack, DirectML puede mostrarse como `GPU`.
 
 ## 5) Ejecutar scripts del proyecto
 
-Para evitar activar manualmente el entorno en cada terminal:
+Forma recomendada (sin activar entorno ni definir variables):
 
 ```powershell
-$PY = ".venv\Scripts\python.exe"
+uv run --python 3.10 <script.py> [args]
+```
+
+Ejemplo rápido:
+
+```powershell
+uv run --python 3.10 train_detector.py --help
 ```
 
 ## 6) Entrenamiento del detector (hoja)
@@ -106,13 +118,13 @@ Valores normalizados entre 0 y 1.
 CPU:
 
 ```powershell
-$PY train_detector.py --data dataset/leaf_detection.yaml --epochs 50 --batch 16 --imgsz 640 --model small --device cpu
+uv run --python 3.10 train_detector.py --data dataset/leaf_detection.yaml --epochs 50 --batch 16 --imgsz 640 --model small --device cpu
 ```
 
 GPU/DirectML (recomendado):
 
 ```powershell
-$PY train_detector.py --data dataset/leaf_detection.yaml --epochs 50 --batch 16 --imgsz 640 --model small --device auto --strict-device
+uv run --python 3.10 train_detector.py --data dataset/leaf_detection.yaml --epochs 50 --batch 16 --imgsz 640 --model small --device auto --strict-device
 ```
 
 Opciones principales del detector:
@@ -133,7 +145,7 @@ Dataset esperado (por carpetas de clase):
 Entrenamiento base:
 
 ```powershell
-$PY train_classifier.py --arch efficientnetb0 --epochs 30 --ft-epochs 15 --aug moderate
+uv run --python 3.10 train_classifier.py --arch efficientnetb0 --epochs 30 --ft-epochs 15 --aug moderate
 ```
 
 Opciones principales del clasificador:
@@ -151,7 +163,7 @@ Script principal: `pipeline.py`
 ### 8.1 Desde CLI
 
 ```powershell
-$PY pipeline.py dataset/test/rust/1120.jpg
+uv run --python 3.10 pipeline.py dataset/test/rust/1120.jpg
 ```
 
 ### 8.2 Desde Python
@@ -174,13 +186,14 @@ Definidas en `config.py`:
 - Clasificador final: `saved_models/disease_classifier.keras`
 - Mejor clasificador (checkpoint): `saved_models/best_disease_classifier.keras`
 
-## 10) uv run (opcional)
+## 10) Comandos recomendados (tu flujo)
 
-Tambien puedes ejecutar con `uv run` manteniendo Python 3.10:
+Ejecución recomendada y directa con `uv run` (sin variables y sin activar `.venv`):
 
 ```powershell
 uv run --python 3.10 train_classifier.py --arch efficientnetb0 --epochs 5 --ft-epochs 2
 uv run --python 3.10 pipeline.py dataset/test/rust/1120.jpg
+uv run --python 3.10 train_detector.py --data dataset/leaf_detection.yaml --epochs 50 --batch 16 --imgsz 640 --model small --device auto --strict-device
 ```
 
 ## 11) Troubleshooting rapido
@@ -190,7 +203,7 @@ uv run --python 3.10 pipeline.py dataset/test/rust/1120.jpg
 Significa que TensorFlow no detecto acelerador en ese entorno.
 
 ```powershell
-$PY -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU')); print(tf.config.list_physical_devices('DML'))"
+uv run --python 3.10 python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU')); print(tf.config.list_physical_devices('DML'))"
 ```
 
 ### Entrena pero muy lento

@@ -6,6 +6,7 @@ requires-python = ">=3.10,<3.11"
 dependencies = [
   "tensorflow-cpu==2.10.0",
   "tensorflow-directml-plugin; platform_system == 'Windows'",
+  "tensorflow-io-gcs-filesystem==0.31.0",
   "opencv-python>=4.8.0",
   "numpy>=1.24.0,<2.0.0",
   "matplotlib>=3.7.0",
