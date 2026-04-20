@@ -90,44 +90,88 @@ def _iter_images(root: Path):
             yield file
 
 
-def _load_split(
-    images_dir: Path,
-    labels_dir: Path,
-    img_size: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    x_data: list[np.ndarray] = []
-    bbox_data: list[np.ndarray] = []
-    obj_data: list[np.ndarray] = []
-
+def _collect_samples(images_dir: Path, labels_dir: Path) -> list[tuple[Path, Path]]:
+    samples: list[tuple[Path, Path]] = []
     for image_path in _iter_images(images_dir):
         rel = image_path.relative_to(images_dir)
         label_path = labels_dir / rel.with_suffix(".txt")
+        samples.append((image_path, label_path))
+    return samples
 
-        image_bgr = cv2.imread(str(image_path))
-        if image_bgr is None:
-            continue
 
-        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        image_rgb = cv2.resize(image_rgb, (img_size, img_size), interpolation=cv2.INTER_AREA)
+def _load_sample(
+    image_path: Path,
+    label_path: Path,
+    img_size: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    image_bgr = cv2.imread(str(image_path))
+    if image_bgr is None:
+        return None
 
-        bbox, obj = _read_first_valid_yolo_bbox(label_path)
+    image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    image_rgb = cv2.resize(image_rgb, (img_size, img_size), interpolation=cv2.INTER_AREA)
 
-        x_data.append(image_rgb.astype(np.float32) / 255.0)
-        bbox_data.append(bbox)
-        obj_data.append(np.array([obj], dtype=np.float32))
+    bbox, obj = _read_first_valid_yolo_bbox(label_path)
 
-    if not x_data:
-        return (
-            np.zeros((0, img_size, img_size, 3), dtype=np.float32),
-            np.zeros((0, 4), dtype=np.float32),
-            np.zeros((0, 1), dtype=np.float32),
-        )
+    x = image_rgb.astype(np.float32) / 255.0
+    y_bbox = bbox.astype(np.float32)
+    y_obj = np.array([obj], dtype=np.float32)
+    return x, y_bbox, y_obj
 
-    return (
-        np.stack(x_data, axis=0),
-        np.stack(bbox_data, axis=0),
-        np.stack(obj_data, axis=0),
-    )
+
+class _YoloSequence(tf.keras.utils.Sequence):
+    """Carga muestras por lotes para evitar copiar todo el dataset a GPU/RAM."""
+
+    def __init__(
+        self,
+        samples: list[tuple[Path, Path]],
+        img_size: int,
+        batch_size: int,
+        shuffle: bool = True,
+    ):
+        self.samples = samples
+        self.img_size = img_size
+        self.batch_size = max(1, int(batch_size))
+        self.shuffle = shuffle
+        self.indices = np.arange(len(samples))
+        self.on_epoch_end()
+
+    def __len__(self) -> int:
+        return int(np.ceil(len(self.samples) / self.batch_size))
+
+    def __getitem__(self, idx: int):
+        start = idx * self.batch_size
+        end = min((idx + 1) * self.batch_size, len(self.samples))
+        batch_indices = self.indices[start:end]
+
+        x_data: list[np.ndarray] = []
+        bbox_data: list[np.ndarray] = []
+        obj_data: list[np.ndarray] = []
+
+        for sample_idx in batch_indices:
+            image_path, label_path = self.samples[int(sample_idx)]
+            loaded = _load_sample(image_path, label_path, self.img_size)
+            if loaded is None:
+                continue
+            x, y_bbox, y_obj = loaded
+            x_data.append(x)
+            bbox_data.append(y_bbox)
+            obj_data.append(y_obj)
+
+        if not x_data:
+            raise RuntimeError(
+                "No se pudo cargar ninguna imagen valida en un batch. "
+                "Verifica archivos corruptos en el dataset."
+            )
+
+        return np.stack(x_data, axis=0), {
+            "bbox": np.stack(bbox_data, axis=0),
+            "obj": np.stack(obj_data, axis=0),
+        }
+
+    def on_epoch_end(self):
+        if self.shuffle:
+            np.random.shuffle(self.indices)
 
 
 def _build_detector_model(img_size: int, variant: str) -> tf.keras.Model:
@@ -248,19 +292,39 @@ class LeafDetector:
         train_labels = _guess_labels_dir(base_path, parsed["train"])
         val_labels = _guess_labels_dir(base_path, parsed["val"])
 
-        x_train, y_bbox_train, y_obj_train = _load_split(train_images, train_labels, img_size)
-        x_val, y_bbox_val, y_obj_val = _load_split(val_images, val_labels, img_size)
+        train_samples = _collect_samples(train_images, train_labels)
+        val_samples = _collect_samples(val_images, val_labels)
 
-        if x_train.shape[0] == 0:
+        if len(train_samples) == 0:
             raise RuntimeError("No hay imagenes validas para entrenamiento en el split train.")
 
+        print(
+            f"Muestras cargadas (streaming): train={len(train_samples)} val={len(val_samples)}"
+        )
+
         self._ensure_model(img_size)
+
+        train_seq = _YoloSequence(
+            samples=train_samples,
+            img_size=img_size,
+            batch_size=batch,
+            shuffle=True,
+        )
+
+        val_seq = None
+        if len(val_samples) > 0:
+            val_seq = _YoloSequence(
+                samples=val_samples,
+                img_size=img_size,
+                batch_size=batch,
+                shuffle=False,
+            )
 
         output_dir = os.path.join(project, name)
         os.makedirs(output_dir, exist_ok=True)
         best_model_path = os.path.join(output_dir, "best_detector.keras")
 
-        monitor = "val_loss" if x_val.shape[0] > 0 else "loss"
+        monitor = "val_loss" if val_seq is not None else "loss"
         callbacks = [
             tf.keras.callbacks.EarlyStopping(
                 monitor=monitor,
@@ -275,15 +339,7 @@ class LeafDetector:
             ),
         ]
 
-        validation_data = None
-        if x_val.shape[0] > 0:
-            validation_data = (
-                x_val,
-                {
-                    "bbox": y_bbox_val,
-                    "obj": y_obj_val,
-                },
-            )
+        validation_data = val_seq
 
         if device == "gpu":
             tf_device = "/GPU:0"
@@ -296,14 +352,9 @@ class LeafDetector:
 
         with tf.device(tf_device):
             history = self.model.fit(
-                x_train,
-                {
-                    "bbox": y_bbox_train,
-                    "obj": y_obj_train,
-                },
+                train_seq,
                 validation_data=validation_data,
                 epochs=epochs,
-                batch_size=batch,
                 callbacks=callbacks,
                 verbose=1,
             )
